@@ -3,6 +3,7 @@
 #include "ProcessGuardCommon.h"
 #include "AutoLock.h"
 
+
 DRIVER_UNLOAD ProcessGuardUnload;
 DRIVER_DISPATCH ProcessGuardCreateClose;
 NTSTATUS ProcessGuardDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp);
@@ -73,9 +74,11 @@ void OnProcessNotify(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO
 				DbgPrint("Forbidden Processes Count: -> %d", g_Globals.ForbiddenProcessesCount);
 				PLIST_ENTRY temp = nullptr;
 				temp = &g_Globals.ForbiddenProcessesHead;
-				while (&g_Globals.ForbiddenProcessesHead != temp->Flink) {
+				temp = temp->Flink;
+				while (&g_Globals.ForbiddenProcessesHead != temp) {
 					auto item = CONTAINING_RECORD(temp, ForbiddenProcess<UNICODE_STRING>, Entry); //BUG IT'S EMPTY ON FIRST ITER, CAUSE BSOD.
-					DbgPrint("Current forbidden process -> %wZ", item->ProcessPath);
+					DbgPrint("Address at iteration -> %p", &item->Entry);
+					DbgPrint("Current forbidden process -> %wZ", &item->ProcessPath);
 					DbgPrint("Image name -> %wZ", CreateInfo->ImageFileName);
 					if (0 == RtlCompareUnicodeString(CreateInfo->ImageFileName, &item->ProcessPath, TRUE)) {
 						DbgPrint("Found Forbidden Process -> %wZ", item->ProcessPath);
@@ -100,7 +103,9 @@ void ProcessGuardUnload(PDRIVER_OBJECT DriverObject) {
 	// Free list
 	while (!IsListEmpty(&g_Globals.ForbiddenProcessesHead)) {
 		auto entry = RemoveHeadList(&g_Globals.ForbiddenProcessesHead);
-		ExFreePool(CONTAINING_RECORD(entry, ForbiddenProcess<UNICODE_STRING>, Entry));
+		auto item = CONTAINING_RECORD(entry, ForbiddenProcess<UNICODE_STRING>, Entry);
+		RtlFreeUnicodeString(&item->ProcessPath);
+		ExFreePool(item);
 	}
 }
 
@@ -137,8 +142,9 @@ NTSTATUS ProcessGuardDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 				status = STATUS_INVALID_PARAMETER;
 				break;
 			}
-			RtlInitUnicodeString(&info->ProcessPath, data->ProcessPath);
+			RtlCreateUnicodeString(&info->ProcessPath, data->ProcessPath);
 			DbgPrint("Received Process -> %wZ", info->ProcessPath);
+			DbgPrint("Inserting to list -> %p", &info->Entry);
 			PushItem(&info->Entry);
 		}
 		default:
@@ -158,6 +164,7 @@ void PushItem(LIST_ENTRY* entry) {
 		auto head = RemoveHeadList(&g_Globals.ForbiddenProcessesHead);
 		g_Globals.ForbiddenProcessesCount--;
 		auto item = CONTAINING_RECORD(head, ForbiddenProcess<UNICODE_STRING>, Entry);
+		RtlFreeUnicodeString(&item->ProcessPath);
 		ExFreePool(item);
 	}
 	InsertTailList(&g_Globals.ForbiddenProcessesHead, entry);
