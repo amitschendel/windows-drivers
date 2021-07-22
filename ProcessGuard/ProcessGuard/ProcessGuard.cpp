@@ -1,18 +1,15 @@
 #include "pch.h"
 #include "ProcessGuard.h"
-//#include "Utils.h"
 #include "ProcessGuardCommon.h"
 #include "AutoLock.h"
 
 DRIVER_UNLOAD ProcessGuardUnload;
-DRIVER_DISPATCH ProcessGuardCreateClose; //ProcessGuardWrite;
+DRIVER_DISPATCH ProcessGuardCreateClose;
 NTSTATUS ProcessGuardDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp);
 void OnProcessNotify(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO CreateInfo);
 void PushItem(LIST_ENTRY* entry);
-bool IsForbiddenProcess(PCUNICODE_STRING imageFileName);
 
 Globals g_Globals;
-//auto g_Globals = *(Globals*)ExAllocatePoolWithTag(NonPagedPool, sizeof(Globals), DRIVER_TAG);
 
 extern "C"
 NTSTATUS
@@ -34,7 +31,6 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
 			KdPrint((DRIVER_PREFIX "failed to create device (0x%08X)\n", status));
 			break;
 		}
-		//DeviceObject->Flags |= DO_BUFFERED_IO;
 
 		status = IoCreateSymbolicLink(&symLink, &devName);
 		if (!NT_SUCCESS(status)) {
@@ -61,7 +57,6 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
 
 	DriverObject->DriverUnload = ProcessGuardUnload;
 	DriverObject->MajorFunction[IRP_MJ_CREATE] = DriverObject->MajorFunction[IRP_MJ_CLOSE] = ProcessGuardCreateClose;
-	//DriverObject->MajorFunction[IRP_MJ_WRITE] = ProcessGuardWrite;
 	DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = ProcessGuardDeviceControl;
 
 	return STATUS_SUCCESS;
@@ -70,57 +65,39 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
 void OnProcessNotify(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO CreateInfo) {
 	UNREFERENCED_PARAMETER(Process);
 	UNREFERENCED_PARAMETER(ProcessId);
-	//UNICODE_STRING FORBIDDEN_PROCESS_PATH = RTL_CONSTANT_STRING(L"\\??\\C:\\Windows\\system32\\notepad.exe");
+	
 	if (CreateInfo) {
 		if (CreateInfo->FileOpenNameAvailable && CreateInfo->ImageFileName) {
-			//DbgPrint("Image -> %wZ", CreateInfo->ImageFileName);
-			//DbgPrint("My -> %wZ", &FORBIDDEN_PROCESS_PATH);
-			
-			/*if (0 == RtlCompareUnicodeString(CreateInfo->ImageFileName, &FORBIDDEN_PROCESS_PATH, TRUE)) {
-				DbgPrint("Terminating Notepad Process");
-				CreateInfo->CreationStatus = STATUS_ACCESS_DENIED;
-			}*/
-
 			AutoLock lock(g_Globals.Mutex);
 			if (g_Globals.ForbiddenProcessesCount > 0) {
+				DbgPrint("Forbidden Processes Count: -> %d", g_Globals.ForbiddenProcessesCount);
 				PLIST_ENTRY temp = nullptr;
 				temp = &g_Globals.ForbiddenProcessesHead;
-				//int count = 0;
-
 				while (&g_Globals.ForbiddenProcessesHead != temp->Flink) {
-					temp = temp->Flink;
-					UNICODE_STRING s = CONTAINING_RECORD(temp, ForbiddenProcess<UNICODE_STRING>, Entry)->ProcessPath;//BUG IT'S EMPTY
-					DbgPrint("Found Forbidden Process -> %wZ", &s);
-					//auto entry = RemoveHeadList(&g_Globals.ForbiddenProcessesHead);
-					//auto info = CONTAINING_RECORD(entry, ForbiddenProcess<UNICODE_STRING>, Entry);
-					//InsertHeadList(&g_Globals.ForbiddenProcessesHead, entry);
-					//InsertTailList(&g_Globals.ForbiddenProcessesHead, entry);
-					//AutoLock unlock(g_Globals.Mutex);
-					if (0 == RtlCompareUnicodeString(CreateInfo->ImageFileName, &s, TRUE)) {
-						DbgPrint("Found Forbidden Process -> %wZ", &s);
+					auto item = CONTAINING_RECORD(temp, ForbiddenProcess<UNICODE_STRING>, Entry); //BUG IT'S EMPTY ON FIRST ITER, CAUSE BSOD.
+					DbgPrint("Current forbidden process -> %wZ", item->ProcessPath);
+					DbgPrint("Image name -> %wZ", CreateInfo->ImageFileName);
+					if (0 == RtlCompareUnicodeString(CreateInfo->ImageFileName, &item->ProcessPath, TRUE)) {
+						DbgPrint("Found Forbidden Process -> %wZ", item->ProcessPath);
 						CreateInfo->CreationStatus = STATUS_ACCESS_DENIED;
 						break;
 					}
-					//ExFreePool(info);
+					temp = temp->Flink;
 				}
 			}
-			//DbgPrint("A new process was created");
-			/*if (IsForbiddenProcess(CreateInfo->ImageFileName)) {
-				CreateInfo->CreationStatus = STATUS_ACCESS_DENIED;
-			}*/
 		}
 	}
 }
 
 void ProcessGuardUnload(PDRIVER_OBJECT DriverObject) {
-	// unregister process notifications
+	// Unregister process notifications
 	PsSetCreateProcessNotifyRoutineEx(OnProcessNotify, TRUE);
 
 	UNICODE_STRING symLink = RTL_CONSTANT_STRING(L"\\??\\ProcessGuard");
 	IoDeleteSymbolicLink(&symLink);
 	IoDeleteDevice(DriverObject->DeviceObject);
 
-	// free list
+	// Free list
 	while (!IsListEmpty(&g_Globals.ForbiddenProcessesHead)) {
 		auto entry = RemoveHeadList(&g_Globals.ForbiddenProcessesHead);
 		ExFreePool(CONTAINING_RECORD(entry, ForbiddenProcess<UNICODE_STRING>, Entry));
@@ -134,47 +111,9 @@ NTSTATUS ProcessGuardCreateClose(PDEVICE_OBJECT, PIRP Irp) {
 	return STATUS_SUCCESS;
 }
 
-//NTSTATUS ProcessGuardWrite(PDEVICE_OBJECT, PIRP Irp) {
-//	auto stack = IoGetCurrentIrpStackLocation(Irp);
-//	auto len = stack->Parameters.Write.Length;
-//	auto status = STATUS_SUCCESS;
-//	auto size = sizeof(ForbiddenProcess<PUNICODE_STRING>);
-//	auto info = (ForbiddenProcess<PUNICODE_STRING>*)ExAllocatePoolWithTag(PagedPool, size, DRIVER_TAG);
-//	if (info == nullptr) {
-//		KdPrint((DRIVER_PREFIX "failed allocation\n"));
-//		status = STATUS_INSUFFICIENT_RESOURCES;
-//		Irp->IoStatus.Status = status;
-//		Irp->IoStatus.Information = len;
-//		IoCompleteRequest(Irp, 0);
-//		return status;
-//	}
-//	//NT_ASSERT(Irp->MdlAddress);
-//	DbgPrint("PASSED");
-//	auto buffer = (WCHAR*)Irp->AssociatedIrp.SystemBuffer;
-//
-//	////auto buffer = (WCHAR*)MmGetSystemAddressForMdlSafe(Irp->MdlAddress, NormalPagePriority);
-//	//UNICODE_STRING buffer = RTL_CONSTANT_STRING(L"\\??\\C:\\Windows\\system32\\notepad.exe");
-//	if (!buffer) {
-//		DbgPrint("no buffer");
-//		status = STATUS_INVALID_PARAMETER;
-//	}
-//	else {
-//		//auto& item = info->ProcessPath;
-//		//RtlCopyMemory(item, buffer, len);
-//		//RtlCopyMemory(info->ProcessPath, buffer, sizeof(buffer));
-//		DbgPrint("process path -> %wZ", buffer);
-//		//PushItem(&info->Entry, g_Globals);
-//	}
-//	Irp->IoStatus.Status = status;
-//	Irp->IoStatus.Information = len;
-//	IoCompleteRequest(Irp, 0);
-//	return status;
-//}
-
 NTSTATUS ProcessGuardDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 	UNREFERENCED_PARAMETER(DeviceObject);
 	auto stack = IoGetCurrentIrpStackLocation(Irp);
-	//auto len = stack->Parameters.Write.Length;
 	auto status = STATUS_SUCCESS;
 	auto size = sizeof(ForbiddenProcess<UNICODE_STRING>);
 	auto info = (ForbiddenProcess<UNICODE_STRING>*)ExAllocatePoolWithTag(PagedPool, size, DRIVER_TAG);
@@ -198,12 +137,8 @@ NTSTATUS ProcessGuardDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 				status = STATUS_INVALID_PARAMETER;
 				break;
 			}
-			//UNICODE_STRING tS = RTL_CONSTANT_STRING(data->ProcessPath);
 			RtlInitUnicodeString(&info->ProcessPath, data->ProcessPath);
-			//RtlCopyMemory(info->ProcessPath, &tS, sizeof(tS));
-			//info->ProcessPath = data->ProcessPath;
 			DbgPrint("Received Process -> %wZ", info->ProcessPath);
-			//DbgPrint("Received Process -> %wZ", &tS);
 			PushItem(&info->Entry);
 		}
 		default:
@@ -218,7 +153,7 @@ NTSTATUS ProcessGuardDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 
 void PushItem(LIST_ENTRY* entry) {
 	AutoLock<FastMutex> lock(g_Globals.Mutex);
-	if (g_Globals.ForbiddenProcessesCount > 1024) {
+	if (g_Globals.ForbiddenProcessesCount > MAX_FORBIDDEN_PROCESSES) {
 		// too many items, remove oldest one
 		auto head = RemoveHeadList(&g_Globals.ForbiddenProcessesHead);
 		g_Globals.ForbiddenProcessesCount--;
@@ -227,23 +162,4 @@ void PushItem(LIST_ENTRY* entry) {
 	}
 	InsertTailList(&g_Globals.ForbiddenProcessesHead, entry);
 	g_Globals.ForbiddenProcessesCount++;
-}
-
-bool IsForbiddenProcess(PCUNICODE_STRING imageFileName) {
-	AutoLock lock(g_Globals.Mutex);
-	int count = 0;
-	bool isForbidden = false;
-	while (!IsListEmpty(&g_Globals.ForbiddenProcessesHead) && count < g_Globals.ForbiddenProcessesCount) {
-		auto entry = RemoveHeadList(&g_Globals.ForbiddenProcessesHead);
-		auto info = CONTAINING_RECORD(entry, ForbiddenProcess<UNICODE_STRING>, Entry);
-		InsertHeadList(&g_Globals.ForbiddenProcessesHead, entry);
-		if (0 == RtlCompareUnicodeString(imageFileName, &info->ProcessPath, TRUE)) {
-			DbgPrint("Found Forbidden Process -> %wZ", info->ProcessPath);
-			isForbidden = true;
-			break;
-		}
-		count++;
-		ExFreePool(info);
-	}
-	return isForbidden;
 }
