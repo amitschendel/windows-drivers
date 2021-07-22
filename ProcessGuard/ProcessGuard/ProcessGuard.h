@@ -3,6 +3,7 @@
 
 #define DRIVER_PREFIX "ProcessGuard: "
 #define DRIVER_TAG 'pg'
+#define MAX_FORBIDDEN_PROCESSES 1024
 
 
 template<typename T>
