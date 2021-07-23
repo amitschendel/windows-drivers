@@ -40,7 +40,7 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
 		}
 		symLinkCreated = true;
 
-		// register for process notifications
+		// Register for process notifications
 		status = PsSetCreateProcessNotifyRoutineEx(OnProcessNotify, FALSE);
 		if (!NT_SUCCESS(status)) {
 			KdPrint((DRIVER_PREFIX "failed to register for process callbacks (0x%08X)\n", status));
@@ -76,7 +76,7 @@ void OnProcessNotify(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO
 				temp = &g_Globals.ForbiddenProcessesHead;
 				temp = temp->Flink;
 				while (&g_Globals.ForbiddenProcessesHead != temp) {
-					auto item = CONTAINING_RECORD(temp, ForbiddenProcess<UNICODE_STRING>, Entry); //BUG IT'S EMPTY ON FIRST ITER, CAUSE BSOD.
+					auto item = CONTAINING_RECORD(temp, ForbiddenProcess<UNICODE_STRING>, Entry);
 					DbgPrint("Address at iteration -> %p", &item->Entry);
 					DbgPrint("Current forbidden process -> %wZ", &item->ProcessPath);
 					DbgPrint("Image name -> %wZ", CreateInfo->ImageFileName);
@@ -160,7 +160,7 @@ NTSTATUS ProcessGuardDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 void PushItem(LIST_ENTRY* entry) {
 	AutoLock<FastMutex> lock(g_Globals.Mutex);
 	if (g_Globals.ForbiddenProcessesCount > MAX_FORBIDDEN_PROCESSES) {
-		// too many items, remove oldest one
+		// Too many items, remove oldest one
 		auto head = RemoveHeadList(&g_Globals.ForbiddenProcessesHead);
 		g_Globals.ForbiddenProcessesCount--;
 		auto item = CONTAINING_RECORD(head, ForbiddenProcess<UNICODE_STRING>, Entry);
