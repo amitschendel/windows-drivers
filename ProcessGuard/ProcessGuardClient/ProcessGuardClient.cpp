@@ -14,14 +14,7 @@ int main() {
 	}
 	PCWSTR path = L"\\??\\C:\\Windows\\system32\\notepad.exe";
 	PCWSTR processName = L"notepad.exe";
-	/*DWORD bytesWritten;
-	if (!::WriteFile(hFile, path, sizeof(path), &bytesWritten, NULL)) {
-		ERROR_MSG("Failed to write to file");
-		return 1;
-	}*/
-	//UNICODE_STRING t;
 	ProcessData data;
-	//::wstring
 	
 	data.ProcessPath = path;
 	data.ProcessName = processName;
